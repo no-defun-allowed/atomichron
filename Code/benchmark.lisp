@@ -11,4 +11,4 @@
   (loop repeat thread-count
         collect (bt:make-thread #'run-work) into threads
         finally (mapc #'bt:join-thread threads))
-  (atomichron:print-meters '(benchmark)))
+  (atomichron:print-meters :groups '(benchmark)))

@@ -2,11 +2,10 @@
 
 atomichron is yet another library we yoinked out of
 decentralise2-utilities. It currently implements a time meter, which
-tracks how many times a form is evaluated, how long evaluation takes,
-and the standard deviation of execution time. It uses atomic
-instructions so that meters will present correct results in the
-presence of multiple threads, while trying to minimize synchronisation
-latency.
+tracks how many times a form is evaluated, and how long evaluation
+takes. It uses atomic instructions so that meters will present correct
+results in the presence of multiple threads, while trying to minimize
+synchronisation latency.
 
 We have used this code to meter phenomena in decentralise2 which may
 occur on the scale of tens to hundreds of nanoseconds. Atomics aren't

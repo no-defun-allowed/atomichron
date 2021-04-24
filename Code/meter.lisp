@@ -20,7 +20,7 @@
   (check-type name symbol)
   (check-type description string) 
   (alexandria:with-gensyms (meter-vector)
-    `(let ((,meter-vector (make-incrementable-vector 3)))
+    `(let ((,meter-vector (make-incrementable-vector 2)))
        (defglobal ,name ,meter-vector)
        (bt:with-lock-held (*meter-group-lock*)
          (pushnew (make-meter-information
@@ -48,13 +48,12 @@
          (funcall continuation)
       (let* ((end-time (get-internal-real-time))
              (Δtime    (- end-time start-time)))
-        (declare (#-(and sbcl 64-bit) (simple-vector 3)
-                    #+(and sbcl 64-bit) (simple-array sb-ext:word (3))
+        (declare (#-(and sbcl 64-bit) (simple-vector 2)
+                    #+(and sbcl 64-bit) (simple-array sb-ext:word (2))
                     meter))
         (increment meter 0 1)
         (unless (zerop Δtime)
           ;; Avoid a CAS if we're not going to change the total time meter.
-          (increment meter 2 (expt Δtime 2))
           (increment meter 1 Δtime))))))
 
 #+disable-meters
@@ -74,30 +73,19 @@
   (when (null groups)
     (setf groups (sort (alexandria:hash-table-keys *meter-groups*)
                        #'string<)))
-  (format stream "~&  ~32a ~8@a ~8@a ~8@a ~8@a"
-          "meter" "calls" "time" "latency" "stdev")
+  (format stream "~&  ~32a ~8@a ~8@a ~8@a"
+          "meter" "calls" "time" "latency")
   (dolist (group (alexandria:ensure-list groups))
     (format stream "~&Meters for ~a:" group)
     (dolist (information
              (sort (copy-list (meters group))
                    #'string< :key #'name))
       (let* ((calls    (aref (meter information) 0))
-             (seconds  (seconds (aref (meter information) 1)))
-             ;; Suppose our time T has been multiplied by
-             ;; internal-time-units-per-second to produce U,
-             ;; i.e. U = i-t-u-p-s × T; T = U / i-t-u-p-s
-             ;; Then T² = (U / i-t-u-p-s)² = U² / i-t-u-p-s²
-             (seconds² (seconds (seconds (aref (meter information) 2)))))
-        (if (zerop calls)
-            (format stream "~&  ~32a ~8,3e ~8,3e      n/a      n/a"
-                    (description information) calls seconds)
-            (let ((standard-deviation
-                    (sqrt (- (/ seconds² calls) (expt (/ seconds calls) 2)))))
-              (format stream "~&  ~32a ~8,3e ~8,3e ~8,3e ~8,3e"
-                      (description information)
-                      calls seconds
-                      (/ seconds calls)
-                      standard-deviation)))))))
+             (seconds  (seconds (aref (meter information) 1))))
+        (format stream "~&  ~32a ~8,3e ~8,3e ~8,3e"
+                (description information)
+                calls seconds
+                (/ seconds calls))))))
 
 (defun reset-meters (groups)
   (when (null groups)

@@ -40,38 +40,43 @@
   `(progn))
 
 (defmacro increment (meter index Δ)
-  ;; We could use ATOMICS:ATOMIC-INCF, but that could overflow on 32-bit hosts
-  ;; and is generally a bit more annoying.
-  #-(and sbcl 64-bit)
+  #-(and (or ccl sbcl) 64-bit)
   `(loop for last-observed = (svref ,meter ,index)
          until (atomics:cas (svref ,meter ,index)
                             last-observed (+ last-observed ,Δ)))
   #+(and sbcl 64-bit)
-  `(atomics:atomic-incf (aref ,meter ,index) ,Δ))
+  `(atomics:atomic-incf (aref ,meter ,index) ,Δ)
+  #+(and ccl 64-bit-host)
+  `(atomics:atomic-incf (svref ,meter ,index) ,Δ))
 
+(declaim (inline call-with-time-meter))
 #-disable-meters
-(defmacro with-time-meter ((name) &body body)
-  (alexandria:with-gensyms (meter-vector start-time end-time Δtime)
-    `(let ((,meter-vector ,name)
-           (,start-time (get-internal-real-time)))
-       (unwind-protect
-            (progn ,@body)
-         (let* ((,end-time (get-internal-real-time))
-                (,Δtime    (- ,end-time ,start-time)))
-           (declare (fixnum ,Δtime)
-                    (#-(and sbcl 64-bit) (simple-vector 3)
-                     #+(and sbcl 64-bit) (simple-array sb-ext:word (3))
-                       ,meter-vector))
-           (increment ,meter-vector 0 1)
-           (unless (zerop ,Δtime)
-             ;; Avoid a CAS if we're not going to change the total time meter.
-             (increment ,meter-vector 2 (expt ,Δtime 2))
-             (increment ,meter-vector 1 ,Δtime)))))))
+(defun call-with-time-meter (meter continuation)
+  (declare (optimize (speed 3))
+           (function continuation)
+           #+sbcl
+           (sb-ext:muffle-conditions sb-ext:compiler-note))
+  (let ((start-time (get-internal-real-time)))
+    (unwind-protect
+         (funcall continuation)
+      (let* ((end-time (get-internal-real-time))
+             (Δtime    (- end-time start-time)))
+        (declare (#-(and sbcl 64-bit) (simple-vector 3)
+                    #+(and sbcl 64-bit) (simple-array sb-ext:word (3))
+                    meter))
+        (increment meter 0 1)
+        (unless (zerop Δtime)
+          ;; Avoid a CAS if we're not going to change the total time meter.
+          (increment meter 2 (expt Δtime 2))
+          (increment meter 1 Δtime))))))
 
 #+disable-meters
+(defun call-with-time-meter (meter continuation)
+  (declare (ignore meter))
+  (funcall continuation))
+
 (defmacro with-time-meter ((name) &body body)
-  (declare (ignore name))
-  `(progn ,@body))
+  `(call-with-time-meter ,name (lambda () ,@body)))
            
 (defun meters (group)
   (values (gethash group *meter-groups*)))
@@ -111,7 +116,6 @@
   (when (null groups)
     (setf groups (alexandria:hash-table-keys *meter-groups*)))
   (dolist (group (alexandria:ensure-list groups))
-    (dolist (pair (meters group))
-      (setf (aref (cdr pair) 0) 0
-            (aref (cdr pair) 1) 0
-            (aref (cdr pair) 2) 0))))
+    (dolist (information (meters group))
+      (let ((meter (meter information)))
+        (fill meter 0)))))

@@ -1,4 +1,6 @@
 (asdf:defsystem :atomichron
   :depends-on (:bordeaux-threads :atomics)
+  :serial t
   :components ((:file "package")
-               (:file "meter" :depends-on ("package"))))
+               (:file "increment")
+               (:file "meter")))

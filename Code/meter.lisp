@@ -20,10 +20,7 @@
   (check-type name symbol)
   (check-type description string) 
   (alexandria:with-gensyms (meter-vector)
-    `(let ((,meter-vector
-             #-(and sbcl 64-bit) (make-array 3 :initial-element 0)
-             #+(and sbcl 64-bit) (make-array 3 :initial-element 0
-                                               :element-type 'sb-ext:word)))
+    `(let ((,meter-vector (make-incrementable-vector 3)))
        (defglobal ,name ,meter-vector)
        (bt:with-lock-held (*meter-group-lock*)
          (pushnew (make-meter-information
@@ -38,16 +35,6 @@
 (defmacro define-time-meter (name description group)
   (declare (ignore name description group))
   `(progn))
-
-(defmacro increment (meter index Δ)
-  #-(and (or ccl sbcl) 64-bit)
-  `(loop for last-observed = (svref ,meter ,index)
-         until (atomics:cas (svref ,meter ,index)
-                            last-observed (+ last-observed ,Δ)))
-  #+(and sbcl 64-bit)
-  `(atomics:atomic-incf (aref ,meter ,index) ,Δ)
-  #+(and ccl 64-bit-host)
-  `(atomics:atomic-incf (svref ,meter ,index) ,Δ))
 
 (declaim (inline call-with-time-meter))
 #-disable-meters
@@ -83,7 +70,7 @@
 (defun seconds (internal-time-units)
   (float (/ internal-time-units internal-time-units-per-second)))
 
-(defun print-meters (groups &key (stream *standard-output*))
+(defun print-meters (&key (groups '()) (stream *standard-output*))
   (when (null groups)
     (setf groups (sort (alexandria:hash-table-keys *meter-groups*)
                        #'string<)))

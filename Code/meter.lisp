@@ -20,7 +20,7 @@
   (check-type name symbol)
   (check-type description string) 
   (alexandria:with-gensyms (meter-vector)
-    `(let ((,meter-vector (make-incrementable-vector 2)))
+    `(let ((,meter-vector (make-incrementable-vector +total-size+)))
        (defglobal ,name ,meter-vector)
        (bt:with-lock-held (*meter-group-lock*)
          (pushnew (make-meter-information
@@ -48,13 +48,15 @@
          (funcall continuation)
       (let* ((end-time (get-internal-real-time))
              (Δtime    (- end-time start-time)))
-        (declare (#-(and sbcl 64-bit) (simple-vector 2)
-                    #+(and sbcl 64-bit) (simple-array sb-ext:word (2))
+        (declare (#-(and sbcl 64-bit)
+                  (simple-vector #.+total-size+)
+                  #+(and sbcl 64-bit)
+                  (simple-array sb-ext:word (#.+total-size+))
                     meter))
-        (increment meter 0 1)
+        (increment meter (+ 0 *thread-shard*) 1)
         (unless (zerop Δtime)
           ;; Avoid a CAS if we're not going to change the total time meter.
-          (increment meter 1 Δtime))))))
+          (increment meter (+ 1 *thread-shard*) Δtime))))))
 
 #+disable-meters
 (defun call-with-time-meter (meter continuation)
@@ -69,6 +71,13 @@
 (defun seconds (internal-time-units)
   (float (/ internal-time-units internal-time-units-per-second)))
 
+(defun meter-values (meter)
+  (loop for position from 0 below +total-size+
+        by +shard-spacing+
+        sum (aref meter position)      into total-calls
+        sum (aref meter (1+ position)) into total-time
+        finally (return (values total-calls (seconds total-time)))))
+
 (defun print-meters (&key (groups '()) (stream *standard-output*))
   (when (null groups)
     (setf groups (sort (alexandria:hash-table-keys *meter-groups*)
@@ -80,8 +89,8 @@
     (dolist (information
              (sort (copy-list (meters group))
                    #'string< :key #'name))
-      (let* ((calls    (aref (meter information) 0))
-             (seconds  (seconds (aref (meter information) 1))))
+      (multiple-value-bind (calls seconds)
+          (meter-values (meter information))
         (format stream "~&  ~32a ~8,3e ~8,3e ~8,3e"
                 (description information)
                 calls seconds

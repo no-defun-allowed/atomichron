@@ -3,4 +3,5 @@
   :serial t
   :components ((:file "package")
                (:file "increment")
+               (:file "sharding")
                (:file "meter")))
